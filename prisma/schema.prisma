@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  username           String     @unique
+  passwordHash       String
+  fullName           String
+  role               Role       @default(VIEWER)
+  workspaceId        String?
+  workspace          Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  mustChangePassword Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  lastLogin          DateTime?
+  sessions           Session[]
+  createdProjects    Project[]  @relation("CreatedProjects")
+
+  @@index([workspaceId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum Role {
+  SUPER_ADMIN
+  WORKSPACE_ADMIN
+  VIEWER
+}
+
+model Workspace {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  phases    Phase[]
+  domains   Domain[]
+  projects  Project[]
+  users     User[]
+}
+
+model Phase {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  label       String
+  subtitle    String?
+  goal        String?
+  color       String
+  order       Int
+  projects    Project[] @relation("ProjectStartPhase")
+
+  @@index([workspaceId, order])
+}
+
+model Domain {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  color       String
+  order       Int
+  projects    Project[]
+
+  @@index([workspaceId, order])
+}
+
+model Project {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  domainId     String
+  domain       Domain    @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  startPhaseId String
+  startPhase   Phase     @relation("ProjectStartPhase", fields: [startPhaseId], references: [id], onDelete: Cascade)
+  name         String
+  status       Status    @default(PLANNED)
+  progress     Int       @default(0)
+  span         Int       @default(1)
+  tag          String?
+  note         String?
+  createdById  String
+  createdBy    User      @relation("CreatedProjects", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([workspaceId])
+  @@index([domainId])
+  @@index([startPhaseId])
+}
+
+enum Status {
+  ACTIVE
+  DONE
+  SOON
+  PLANNED
+  PAUSED
+  REVIEW
+}

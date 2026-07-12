@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --background: #0d0f14;
+  --panel: rgba(22, 27, 39, 0.72);
+  --panel-strong: rgba(24, 30, 44, 0.92);
+  --line: rgba(255, 255, 255, 0.12);
+  --gold: #c9a84c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(201, 168, 76, 0.14), transparent 28rem),
+    radial-gradient(circle at 80% 15%, rgba(73, 187, 255, 0.12), transparent 26rem),
+    linear-gradient(135deg, #0d0f14 0%, #171b25 44%, #272d3c 100%);
+  color: #f8fafc;
+  font-family: var(--font-vazirmatn), Vazirmatn, Tahoma, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(201, 168, 76, 0.38);
+  color: #fff;
+}
+
+.glass {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.glass-strong {
+  border: 1px solid rgba(201, 168, 76, 0.22);
+  background: var(--panel-strong);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(20px);
+}
+
+.gold-ring {
+  box-shadow:
+    0 0 0 1px rgba(201, 168, 76, 0.24),
+    0 0 32px rgba(201, 168, 76, 0.13);
+}
+
+.scrollbar-soft::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-soft::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  background: rgba(201, 168, 76, 0.42);
+  border-radius: 999px;
+}
