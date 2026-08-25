@@ -1,5 +1,6 @@
-import { PrismaClient, Role, Status } from "@prisma/client";
+import { DeliveryHealth, PrismaClient, Role, ScopeState, Status, WorkItemType, WorkflowStatus } from "@prisma/client";
 import { hash } from "bcryptjs";
+import { tradeProducts, type DemoProject, type DemoTask } from "../lib/trade-portfolio-demo";
 
 const prisma = new PrismaClient();
 
@@ -38,6 +39,20 @@ const phaseSeeds = [
     goal: "بهینه‌سازی، آماده‌سازی رشد و تحویل قابلیت‌های پیشرفته به تیم‌ها",
     color: "#F472B6",
     order: 4
+  },
+  {
+    label: "فصل پنجم",
+    subtitle: "خرداد تا مرداد ۱۴۰۶",
+    goal: "تحویل موج دوم قابلیت‌های Trade و افزایش مقیاس‌پذیری",
+    color: "#7CE38B",
+    order: 5
+  },
+  {
+    label: "فصل ششم",
+    subtitle: "شهریور تا آبان ۱۴۰۶",
+    goal: "تثبیت نهایی، گزارش‌دهی مدیریتی و آماده‌سازی رشد بعدی",
+    color: "#A78BFA",
+    order: 6
   }
 ];
 
@@ -91,6 +106,191 @@ const requiredEnv = (name: string) => {
   if (!value) throw new Error(`Missing required seed environment variable: ${name}`);
   return value;
 };
+
+function metricNumber(value: string) {
+  const normalized = value.replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function monthStart(monthIndex: number) {
+  return new Date(Date.UTC(2026, 5 + monthIndex, 1));
+}
+
+function initiativeStatus(project: DemoProject): WorkflowStatus {
+  const tasks = project.epics.flatMap((epic) => epic.stories.flatMap((story) => story.tasks));
+  if (tasks.length && tasks.every((task) => task.status === "DONE")) return WorkflowStatus.DONE;
+  if (tasks.some((task) => task.status === "BLOCKED")) return WorkflowStatus.BLOCKED;
+  if (tasks.some((task) => task.status === "IN_QA")) return WorkflowStatus.IN_QA;
+  if (tasks.some((task) => task.status === "IN_PROGRESS")) return WorkflowStatus.IN_PROGRESS;
+  return WorkflowStatus.BACKLOG;
+}
+
+function workItemStatus(task: DemoTask): WorkflowStatus {
+  if (task.status === "DONE") return WorkflowStatus.DONE;
+  if (task.status === "BLOCKED") return WorkflowStatus.BLOCKED;
+  if (task.status === "IN_QA") return WorkflowStatus.IN_QA;
+  if (task.status === "IN_PROGRESS") return WorkflowStatus.IN_PROGRESS;
+  return WorkflowStatus.BACKLOG;
+}
+
+async function upsertDemoWorkItem(
+  workspaceId: string,
+  productId: string,
+  initiativeId: string,
+  parentId: string | null,
+  id: string,
+  type: WorkItemType,
+  title: string,
+  status: WorkflowStatus,
+  ownerId: string,
+  team: string
+) {
+  const workItem = await prisma.workItem.upsert({
+    where: { id },
+    update: { productId, initiativeId, parentId, type, title, status, ownerId, team, completedAt: status === WorkflowStatus.DONE ? new Date() : null },
+    create: {
+      id,
+      workspaceId,
+      productId,
+      initiativeId,
+      parentId,
+      type,
+      title,
+      status,
+      health: DeliveryHealth.ON_TRACK,
+      scopeState: ScopeState.COMMITTED,
+      ownerId,
+      team,
+      storyPoints: type === WorkItemType.TASK || type === WorkItemType.BUG || type === WorkItemType.SUBTASK ? 1 : null,
+      completedAt: status === WorkflowStatus.DONE ? new Date() : null
+    }
+  });
+
+  const existingHistory = await prisma.statusHistory.findFirst({ where: { workItemId: workItem.id, toStatus: status } });
+  if (!existingHistory) {
+    await prisma.statusHistory.create({
+      data: { workspaceId, workItemId: workItem.id, toStatus: status, changedById: ownerId }
+    });
+  }
+  return workItem;
+}
+
+async function seedTradePortfolio(workspaceId: string, superAdminId: string) {
+  const productMap = new Map<string, { id: string }>();
+
+  for (const [order, productSeed] of tradeProducts.entries()) {
+    const legacyDomain = await prisma.domain.findFirst({ where: { workspaceId, name: productSeed.name } });
+    const product = await prisma.product.upsert({
+      where: { workspaceId_name: { workspaceId, name: productSeed.name } },
+      update: {
+        slug: productSeed.id,
+        description: productSeed.description,
+        color: productSeed.color,
+        order: order + 1,
+        isActive: true,
+        objective: productSeed.objective,
+        ownerId: superAdminId,
+        legacyDomainId: legacyDomain?.id ?? undefined
+      },
+      create: {
+        workspaceId,
+        legacyDomainId: legacyDomain?.id,
+        name: productSeed.name,
+        slug: productSeed.id,
+        description: productSeed.description,
+        color: productSeed.color,
+        order: order + 1,
+        isActive: true,
+        objective: productSeed.objective,
+        northStarMetric: productSeed.metrics[0]?.label,
+        ownerId: superAdminId
+      }
+    });
+    productMap.set(productSeed.id, product);
+
+    for (const metricSeed of productSeed.metrics) {
+      const metric = await prisma.metric.findFirst({ where: { workspaceId, productId: product.id, name: metricSeed.label } });
+      const data = {
+        workspaceId,
+        productId: product.id,
+        name: metricSeed.label,
+        unit: metricSeed.value.replace(/[۰-۹\d+\-–.\s]/g, "").trim() || null,
+        baseline: null,
+        target: metricNumber(metricSeed.target),
+        actual: metricNumber(metricSeed.value),
+        direction: metricSeed.label.includes("زمان") ? "LOWER_IS_BETTER" as const : "HIGHER_IS_BETTER" as const
+      };
+      if (metric) await prisma.metric.update({ where: { id: metric.id }, data });
+      else await prisma.metric.create({ data });
+    }
+  }
+
+  for (const productSeed of tradeProducts) {
+    const product = productMap.get(productSeed.id);
+    if (!product) continue;
+    for (const project of productSeed.projects) {
+      const start = monthStart(project.startMonth);
+      const end = monthStart(project.startMonth + project.duration);
+      const initiative = await prisma.initiative.upsert({
+        where: { legacyProjectId: `demo-${project.id}` },
+        update: {
+          productId: product.id,
+          name: project.title,
+          summary: project.summary,
+          goal: project.goal,
+          ownerId: superAdminId,
+          team: project.team,
+          plannedStart: start,
+          plannedEnd: new Date(end.getTime() - 24 * 60 * 60 * 1000),
+          status: initiativeStatus(project),
+          health: project.health
+        },
+        create: {
+          workspaceId,
+          productId: product.id,
+          legacyProjectId: `demo-${project.id}`,
+          name: project.title,
+          summary: project.summary,
+          goal: project.goal,
+          ownerId: superAdminId,
+          team: project.team,
+          plannedStart: start,
+          plannedEnd: new Date(end.getTime() - 24 * 60 * 60 * 1000),
+          status: initiativeStatus(project),
+          health: project.health,
+          scopeBaseline: project.epics.reduce((sum, epic) => sum + epic.stories.reduce((storySum, story) => storySum + story.tasks.length, 0), 0),
+          jiraUrl: null
+        }
+      });
+
+      for (const epic of project.epics) {
+        const epicItem = await upsertDemoWorkItem(workspaceId, product.id, initiative.id, null, `demo-${project.id}-${epic.id}`, WorkItemType.EPIC, epic.title, WorkflowStatus.IN_PROGRESS, superAdminId, project.team);
+        for (const story of epic.stories) {
+          const storyItem = await upsertDemoWorkItem(workspaceId, product.id, initiative.id, epicItem.id, `demo-${project.id}-${story.id}`, WorkItemType.STORY, story.title, WorkflowStatus.IN_PROGRESS, superAdminId, project.team);
+          for (const task of story.tasks) {
+            await upsertDemoWorkItem(workspaceId, product.id, initiative.id, storyItem.id, `demo-${project.id}-${task.id}`, WorkItemType.TASK, task.title, workItemStatus(task), superAdminId, project.team);
+          }
+        }
+      }
+
+      for (const [index, label] of project.dependencies.entries()) {
+        await prisma.dependency.upsert({
+          where: { id: `demo-dependency-${project.id}-${index}` },
+          update: { label, fromInitiativeId: initiative.id },
+          create: { id: `demo-dependency-${project.id}-${index}`, workspaceId, fromInitiativeId: initiative.id, label, kind: "BLOCKS" }
+        });
+      }
+      for (const [index, title] of project.blockers.entries()) {
+        await prisma.blocker.upsert({
+          where: { id: `demo-blocker-${project.id}-${index}` },
+          update: { title, initiativeId: initiative.id, status: "OPEN" },
+          create: { id: `demo-blocker-${project.id}-${index}`, workspaceId, initiativeId: initiative.id, title, owner: project.owner, severity: "HIGH", status: "OPEN" }
+        });
+      }
+    }
+  }
+}
 
 const credentialSeeds = [
   ["مدیر کل", "superadmin", "INITIAL_SUPERADMIN_PASSWORD", Role.SUPER_ADMIN, null],
@@ -189,6 +389,8 @@ async function main() {
       await prisma.project.create({ data });
     }
   }
+
+  await seedTradePortfolio(trade.id, superAdmin.id);
 
   for (const [fullName, username, passwordEnv, role, workspaceSlug] of credentialSeeds) {
     const workspaceId = workspaceSlug ? workspaces.get(workspaceSlug)?.id : null;

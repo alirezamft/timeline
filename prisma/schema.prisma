@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model User {
@@ -21,6 +22,10 @@ model User {
   lastLogin          DateTime?
   sessions           Session[]
   createdProjects    Project[]  @relation("CreatedProjects")
+  ownedProducts      Product[]  @relation("ProductOwner")
+  ownedInitiatives   Initiative[] @relation("InitiativeOwner")
+  ownedWorkItems     WorkItem[] @relation("WorkItemOwner")
+  changedStatuses    StatusHistory[] @relation("StatusChangedBy")
 
   @@index([workspaceId])
 }
@@ -54,6 +59,16 @@ model Workspace {
   domains   Domain[]
   projects  Project[]
   users     User[]
+  products  Product[]
+  initiatives Initiative[]
+  workItems WorkItem[]
+  metrics Metric[]
+  metricSnapshots MetricSnapshot[]
+  dependencies Dependency[]
+  blockers Blocker[]
+  statusHistories StatusHistory[]
+  progressSnapshots ProgressSnapshot[]
+  syncRuns SyncRun[]
 }
 
 model Phase {
@@ -113,4 +128,318 @@ enum Status {
   PLANNED
   PAUSED
   REVIEW
+}
+
+enum DeliveryHealth {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+}
+
+enum WorkItemType {
+  EPIC
+  STORY
+  TASK
+  SUBTASK
+  BUG
+  MILESTONE
+}
+
+enum WorkflowStatus {
+  BACKLOG
+  READY_FOR_DEVELOPMENT
+  IN_PROGRESS
+  CODE_REVIEW
+  READY_FOR_QA
+  IN_QA
+  REWORK
+  READY_FOR_RELEASE
+  DONE
+  BLOCKED
+  PAUSED
+  CANCELED
+  OUT_OF_SCOPE
+}
+
+enum ScopeState {
+  COMMITTED
+  CANDIDATE
+  CANCELED
+  OUT_OF_SCOPE
+}
+
+enum MetricDirection {
+  HIGHER_IS_BETTER
+  LOWER_IS_BETTER
+}
+
+enum DependencyKind {
+  BLOCKS
+  RELATES_TO
+}
+
+enum BlockerStatus {
+  OPEN
+  RESOLVED
+}
+
+enum BlockerSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+model Product {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  legacyDomainId String?        @unique
+  name           String
+  slug           String
+  description    String?
+  color          String
+  order          Int            @default(0)
+  isActive       Boolean        @default(true)
+  objective      String?
+  northStarMetric String?
+  health         DeliveryHealth @default(ON_TRACK)
+  ownerId        String?
+  owner          User?          @relation("ProductOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  initiatives    Initiative[]
+  workItems      WorkItem[]
+  metrics        Metric[]
+  progressSnapshots ProgressSnapshot[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([workspaceId, name])
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, order])
+}
+
+model Initiative {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  legacyProjectId String?       @unique
+  name           String
+  summary        String?
+  goal           String?
+  okr            String?
+  ownerId        String?
+  owner          User?          @relation("InitiativeOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  team           String?
+  plannedStart   DateTime?
+  plannedEnd     DateTime?
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  status         WorkflowStatus @default(BACKLOG)
+  health         DeliveryHealth @default(ON_TRACK)
+  scopeBaseline  Int?
+  jiraIssueKey   String?
+  jiraIssueId    String?
+  jiraUrl        String?
+  workItems      WorkItem[]
+  metrics        Metric[]
+  fromDependencies Dependency[] @relation("FromInitiative")
+  toDependencies Dependency[]   @relation("ToInitiative")
+  blockers       Blocker[]
+  progressSnapshots ProgressSnapshot[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([workspaceId, productId])
+  @@index([workspaceId, plannedStart, plannedEnd])
+}
+
+model WorkItem {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  initiativeId    String?
+  initiative      Initiative?    @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+  parentId        String?
+  parent          WorkItem?      @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children        WorkItem[]     @relation("WorkItemHierarchy")
+  type            WorkItemType
+  title           String
+  description     String?
+  status          WorkflowStatus @default(BACKLOG)
+  health          DeliveryHealth @default(ON_TRACK)
+  scopeState      ScopeState     @default(COMMITTED)
+  ownerId         String?
+  owner           User?          @relation("WorkItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  team            String?
+  startDate       DateTime?
+  dueDate         DateTime?
+  completedAt     DateTime?
+  storyPoints     Float?
+  originalEstimate Int?
+  qaReworkCount   Int            @default(0)
+  jiraIssueKey    String?
+  jiraIssueId     String?
+  jiraUrl         String?
+  fromDependencies Dependency[]  @relation("FromWorkItem")
+  toDependencies   Dependency[]  @relation("ToWorkItem")
+  blockers        Blocker[]
+  statusHistory   StatusHistory[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([workspaceId, initiativeId, type])
+  @@index([workspaceId, productId, status])
+  @@index([parentId])
+  @@unique([workspaceId, jiraIssueId])
+}
+
+model Metric {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  initiativeId String?
+  initiative   Initiative?     @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+  name         String
+  unit         String?
+  direction    MetricDirection @default(HIGHER_IS_BETTER)
+  baseline     Float?
+  target       Float?
+  actual       Float?
+  ownerId      String?
+  snapshots    MetricSnapshot[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([workspaceId, productId])
+  @@index([workspaceId, initiativeId])
+}
+
+model MetricSnapshot {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metricId    String
+  metric      Metric    @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  snapshotDate DateTime @db.Date
+  actual      Float
+  createdAt   DateTime  @default(now())
+
+  @@unique([metricId, snapshotDate])
+  @@index([workspaceId, snapshotDate])
+}
+
+model Dependency {
+  id              String          @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fromInitiativeId String?
+  fromInitiative  Initiative?     @relation("FromInitiative", fields: [fromInitiativeId], references: [id], onDelete: Cascade)
+  toInitiativeId   String?
+  toInitiative    Initiative?     @relation("ToInitiative", fields: [toInitiativeId], references: [id], onDelete: Cascade)
+  fromWorkItemId  String?
+  fromWorkItem    WorkItem?       @relation("FromWorkItem", fields: [fromWorkItemId], references: [id], onDelete: Cascade)
+  toWorkItemId    String?
+  toWorkItem      WorkItem?       @relation("ToWorkItem", fields: [toWorkItemId], references: [id], onDelete: Cascade)
+  kind            DependencyKind  @default(BLOCKS)
+  label           String
+  resolvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([workspaceId, resolvedAt])
+}
+
+model Blocker {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  initiativeId String?
+  initiative   Initiative?     @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+  workItemId   String?
+  workItem     WorkItem?       @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  owner        String?
+  severity     BlockerSeverity  @default(MEDIUM)
+  status       BlockerStatus    @default(OPEN)
+  createdAt    DateTime         @default(now())
+  resolvedAt   DateTime?
+  updatedAt    DateTime         @updatedAt
+
+  @@index([workspaceId, status, severity])
+}
+
+model StatusHistory {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workItemId  String
+  workItem    WorkItem       @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  fromStatus  WorkflowStatus?
+  toStatus    WorkflowStatus
+  changedById String?
+  changedBy   User?          @relation("StatusChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  changedAt   DateTime       @default(now())
+  note        String?
+
+  @@index([workspaceId, workItemId, changedAt])
+}
+
+model ProgressSnapshot {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  initiativeId String?
+  initiative   Initiative?     @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+  snapshotDate DateTime        @db.Date
+  totalScope   Int
+  doneScope    Int
+  activeScope  Int
+  blockedScope Int
+  progress     Float
+  scopeAdded   Int             @default(0)
+  scopeRemoved Int             @default(0)
+  velocity     Float?
+  reworkCount  Int             @default(0)
+  health       DeliveryHealth?
+  planProgress Float?
+  actualProgress Float?
+  createdAt    DateTime        @default(now())
+
+  @@index([workspaceId, snapshotDate])
+  @@index([workspaceId, productId, snapshotDate])
+  @@index([workspaceId, initiativeId, snapshotDate])
+}
+
+model SyncRun {
+  id             String     @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider       String
+  status         SyncStatus @default(RUNNING)
+  cursor         DateTime?
+  startedAt      DateTime   @default(now())
+  finishedAt     DateTime?
+  recordsRead    Int        @default(0)
+  recordsUpserted Int       @default(0)
+  recordsSkipped Int        @default(0)
+  error          String?
+  reconciliation Json?
+
+  @@index([workspaceId, startedAt])
 }
