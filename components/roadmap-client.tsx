@@ -198,6 +198,12 @@ export function RoadmapClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/w/${workspace.slug}/portfolio`}
+            className="inline-flex items-center gap-2 rounded-md border border-[#C9A84C]/35 bg-[#C9A84C]/15 px-4 py-2 text-sm font-bold text-[#FFE9A4] hover:bg-[#C9A84C]/25"
+          >
+            مرکز کنترل Trade
+          </Link>
           {user.role === "SUPER_ADMIN" ? (
             <Link
               href="/admin/users"
