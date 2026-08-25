@@ -54,6 +54,47 @@ export const projectSchema = z.object({
   note: z.string().max(1000).optional().nullable()
 });
 
+const workflowStatuses = [
+  "BACKLOG",
+  "READY_FOR_DEVELOPMENT",
+  "IN_PROGRESS",
+  "CODE_REVIEW",
+  "READY_FOR_QA",
+  "IN_QA",
+  "REWORK",
+  "READY_FOR_RELEASE",
+  "DONE",
+  "BLOCKED",
+  "PAUSED",
+  "CANCELED",
+  "OUT_OF_SCOPE"
+] as const;
+
+const workItemTypes = ["EPIC", "STORY", "TASK", "SUBTASK", "BUG", "MILESTONE"] as const;
+
+export const workItemSchema = z.object({
+  productId: z.string().cuid().optional().nullable(),
+  initiativeId: z.string().cuid().optional().nullable(),
+  parentId: z.string().cuid().optional().nullable(),
+  type: z.enum(workItemTypes),
+  title: z.string().min(1, "عنوان کار الزامی است.").max(240),
+  description: z.string().max(5000).optional().nullable(),
+  status: z.enum(workflowStatuses).default("BACKLOG"),
+  ownerId: z.string().cuid().optional().nullable(),
+  team: z.string().max(120).optional().nullable(),
+  startDate: z.coerce.date().optional().nullable(),
+  dueDate: z.coerce.date().optional().nullable(),
+  storyPoints: z.coerce.number().min(0).max(10000).optional().nullable(),
+  originalEstimate: z.coerce.number().int().min(0).max(100000).optional().nullable(),
+  jiraIssueKey: z.string().max(80).optional().nullable(),
+  jiraIssueId: z.string().max(120).optional().nullable(),
+  jiraUrl: z.string().url().max(1000).optional().nullable()
+});
+
+export const workItemUpdateSchema = workItemSchema.partial().extend({
+  scopeState: z.enum(["COMMITTED", "CANDIDATE", "CANCELED", "OUT_OF_SCOPE"]).optional()
+});
+
 export const userCreateSchema = z
   .object({
     fullName: z.string().min(2, "نام نمایشی الزامی است.").max(120),
