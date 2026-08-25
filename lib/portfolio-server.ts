@@ -212,6 +212,14 @@ export async function createProgressSnapshots(workspaceId: string, snapshotDate 
       orderBy: { snapshotDate: "desc" }
     });
     const change = scopeChange(snapshot.rollup.totalScope, previous?.totalScope ?? 0);
+    await prisma.progressSnapshot.deleteMany({
+      where: {
+        workspaceId,
+        productId: snapshot.productId,
+        initiativeId: snapshot.initiativeId,
+        snapshotDate: date
+      }
+    });
     result.push(await prisma.progressSnapshot.create({
       data: {
         workspaceId,
